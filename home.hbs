@@ -1,0 +1,17 @@
+{{!< default}}
+{{!-- The tag above means: insert everything in this file into the body of the default.hbs template --}}
+
+{{> "components/header" headerStyle=@custom.header_style}}
+{{!-- File Converter Component --}}
+<div class="gh-outer">
+    <div class="gh-inner">
+        {{> "components/file-converter"}}
+    </div>
+</div>
+{{#match @custom.header_style "!=" "Highlight"}}
+    {{> "components/featured" showFeatured=@custom.show_featured_posts limit=4}}
+{{/match}}
+
+{{!-- {{> "components/cta"}} --}}
+
+{{!-- {{> "components/post-list" feed="home" postFeedStyle=@custom.post_feed_style showTitle=true showSidebar=@custom.show_publication_info_sidebar}} --}}
