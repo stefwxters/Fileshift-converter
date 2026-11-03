@@ -1,0 +1,294 @@
+{{!-- File Converter Component (Ghost CMS) - optimized --}}
+<section class="boring-converter-section">
+  <div class="boring-converter-container" id="converter-root">
+
+    {{!-- Drop zone: a real <label> so click, Enter and Space work natively --}}
+    <label id="drop-zone" class="boring-drop-zone" for="file-input">
+      <span class="drop-text">Drag your image here or <span class="browse-btn">browse</span></span>
+      <input type="file" id="file-input" class="boring-visually-hidden"
+             accept="image/png,image/jpeg,image/webp">
+    </label>
+
+    {{!-- Settings --}}
+    <div id="converter-controls" class="boring-controls" hidden>
+      <div class="file-info">
+        <strong>Selected file:</strong> <span id="file-name">-</span>
+      </div>
+
+      <div class="control-group">
+        <label for="format-select">Convert to:</label>
+        <select id="format-select">
+          <option value="image/jpeg">JPG / JPEG</option>
+          <option value="image/png">PNG</option>
+          <option value="image/webp">WEBP</option>
+        </select>
+      </div>
+
+      <button id="convert-btn" class="boring-button" type="button">Convert &amp; download</button>
+    </div>
+
+    {{!-- Status / errors (announced to screen readers) --}}
+    <p id="converter-status" class="boring-status" role="status" aria-live="polite"></p>
+
+  </div>
+</section>
+
+<style>
+  .boring-converter-section {
+    --bc-border: #ccc;
+    --bc-bg: #fafafa;
+    --bc-bg-active: #f0f0f0;
+    --bc-text: #111;
+    --bc-accent: #000;
+    --bc-accent-hover: #333;
+    --bc-accent-text: #fff;
+    --bc-error: #b00020;
+    margin: 2rem 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--bc-text);
+  }
+
+  .boring-converter-container {
+    border: 2px dashed var(--bc-border);
+    padding: 2.5rem;
+    border-radius: 8px;
+    background-color: var(--bc-bg);
+    text-align: center;
+    transition: background-color 0.2s, border-color 0.2s;
+  }
+
+  .boring-converter-container.dragover {
+    border-color: var(--bc-accent);
+    background-color: var(--bc-bg-active);
+  }
+
+  .boring-drop-zone {
+    display: block;
+    cursor: pointer;
+    padding: 2rem;
+    border-radius: 6px;
+  }
+
+  .boring-drop-zone:focus-within {
+    outline: 2px solid var(--bc-accent);
+    outline-offset: 2px;
+  }
+
+  .browse-btn {
+    text-decoration: underline;
+    font-weight: bold;
+  }
+
+  .boring-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .boring-controls {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--bc-border);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+  }
+
+  /* `hidden` must win over display:flex above */
+  .boring-controls[hidden] { display: none; }
+
+  .file-info { overflow-wrap: anywhere; }
+
+  .control-group label {
+    font-size: 0.9rem;
+    margin-right: 0.5rem;
+  }
+
+  .boring-controls select {
+    padding: 0.5rem;
+    border: 1px solid var(--bc-border);
+    border-radius: 4px;
+    background: var(--bc-bg);
+    color: var(--bc-text);
+  }
+
+  .boring-button {
+    background-color: var(--bc-accent);
+    color: var(--bc-accent-text);
+    border: none;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .boring-button:hover:not(:disabled) { background-color: var(--bc-accent-hover); }
+  .boring-button:disabled { opacity: 0.6; cursor: progress; }
+
+  .boring-button:focus-visible,
+  .boring-controls select:focus-visible {
+    outline: 2px solid var(--bc-accent);
+    outline-offset: 2px;
+  }
+
+  .boring-status {
+    margin: 1rem 0 0;
+    min-height: 1.25em;
+    font-size: 0.9rem;
+  }
+
+  .boring-status.is-error { color: var(--bc-error); }
+</style>
+
+<script>
+  (() => {
+    const root        = document.getElementById('converter-root');
+    const dropZone    = document.getElementById('drop-zone');
+    const fileInput   = document.getElementById('file-input');
+    const controls    = document.getElementById('converter-controls');
+    const nameDisplay = document.getElementById('file-name');
+    const formatSel   = document.getElementById('format-select');
+    const convertBtn  = document.getElementById('convert-btn');
+    const statusEl    = document.getElementById('converter-status');
+
+    const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp'];
+    const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+    const QUALITY = 0.92; // only applies to JPEG / WebP
+
+    let currentFile = null;
+    let dragDepth = 0; // prevents flicker when dragging over child elements
+
+    const setStatus = (msg = '', isError = false) => {
+      statusEl.textContent = msg;
+      statusEl.classList.toggle('is-error', isError);
+    };
+
+    // ---------- File selection ----------
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) handleFile(fileInput.files[0]);
+    });
+
+    function handleFile(file) {
+      if (!ACCEPTED.includes(file.type)) {
+        setStatus('Please select a PNG, JPG or WEBP image.', true);
+        return;
+      }
+      currentFile = file;
+      nameDisplay.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      controls.hidden = false;
+      setStatus();
+    }
+
+    // ---------- Drag & drop ----------
+    // Stop the browser from navigating to a file dropped outside the zone
+    ['dragover', 'drop'].forEach(type =>
+      window.addEventListener(type, e => {
+        if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault();
+      })
+    );
+
+    root.addEventListener('dragenter', e => {
+      e.preventDefault();
+      dragDepth++;
+      root.classList.add('dragover');
+    });
+
+    root.addEventListener('dragover', e => e.preventDefault());
+
+    root.addEventListener('dragleave', () => {
+      if (--dragDepth <= 0) {
+        dragDepth = 0;
+        root.classList.remove('dragover');
+      }
+    });
+
+    root.addEventListener('drop', e => {
+      e.preventDefault();
+      dragDepth = 0;
+      root.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+
+    // ---------- Conversion ----------
+    // Object URLs avoid the base64 round-trip that FileReader.readAsDataURL does
+    function loadImage(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
+        img.src = url;
+      });
+    }
+
+    const toBlob = (canvas, type, quality) =>
+      new Promise(resolve => canvas.toBlob(resolve, type, quality));
+
+    convertBtn.addEventListener('click', async () => {
+      if (!currentFile) return;
+
+      const targetMime = formatSel.value;
+      convertBtn.disabled = true;
+      setStatus('Converting…');
+
+      try {
+        const img = await loadImage(currentFile);
+        const width  = img.naturalWidth;
+        const height = img.naturalHeight;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        // alpha:false is slightly faster and guarantees no transparency for JPEG
+        const ctx = canvas.getContext('2d', { alpha: targetMime !== 'image/jpeg' });
+
+        // White background so transparent PNGs don't turn black in JPG
+        if (targetMime === 'image/jpeg') {
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, width, height);
+        }
+        ctx.drawImage(img, 0, 0);
+
+        const blob = await toBlob(canvas, targetMime, QUALITY);
+
+        // Browsers silently fall back to PNG if they can't encode the format
+        if (!blob || blob.type !== targetMime) {
+          throw new Error('unsupported');
+        }
+
+        const dot = currentFile.name.lastIndexOf('.');
+        const base = dot > 0 ? currentFile.name.slice(0, dot) : currentFile.name;
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = base + EXT[targetMime];
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Delay revoke: revoking immediately can cancel the download in Safari
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+        setStatus(`Done. Downloaded ${a.download} (${(blob.size / 1024).toFixed(1)} KB).`);
+      } catch (err) {
+        setStatus(
+          err.message === 'unsupported'
+            ? 'Your browser can’t export this format. Try PNG or JPG.'
+            : 'Couldn’t read this image. The file may be corrupt or too large.',
+          true
+        );
+      } finally {
+        convertBtn.disabled = false;
+      }
+    });
+  })();
+</script>
